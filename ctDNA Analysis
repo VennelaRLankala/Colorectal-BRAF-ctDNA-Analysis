@@ -1,0 +1,274 @@
+{
+  "nbformat": 4,
+  "nbformat_minor": 0,
+  "metadata": {
+    "colab": {
+      "provenance": [],
+      "authorship_tag": "ABX9TyMBMhnNpIFtIiFdOBmc+96Y",
+      "include_colab_link": true
+    },
+    "kernelspec": {
+      "name": "python3",
+      "display_name": "Python 3"
+    },
+    "language_info": {
+      "name": "python"
+    }
+  },
+  "cells": [
+    {
+      "cell_type": "markdown",
+      "metadata": {
+        "id": "view-in-github",
+        "colab_type": "text"
+      },
+      "source": [
+        "<a href=\"https://colab.research.google.com/github/VennelaRLankala/Colorectal-BRAF-ctDNA-Analysis/blob/main/ctDNA%20Analysis\" target=\"_parent\"><img src=\"https://colab.research.google.com/assets/colab-badge.svg\" alt=\"Open In Colab\"/></a>"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "execution_count": null,
+      "metadata": {
+        "id": "IsllL7VkPCcw"
+      },
+      "outputs": [],
+      "source": [
+        "import subprocess, sys, shutil\n",
+        "\n",
+        "def run(cmd):\n",
+        "    print(\"RUN:\", cmd)\n",
+        "    res = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)\n",
+        "    print(res.stdout)\n",
+        "    print(res.stderr)\n",
+        "    return res\n",
+        "\n",
+        "run(\"apt-get update -qq\")\n",
+        "run(\"DEBIAN_FRONTEND=noninteractive apt-get install -y -qq wget unzip samtools bwa bedtools bcftools tabix fastqc fastp freebayes default-jre\")\n",
+        "run(\"pip install -q pysam cyvcf2 pandas matplotlib pysradb\")\n"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "import os\n",
+        "\n",
+        "PROJECT = \"/content/ctDNA_project\"\n",
+        "SRR_BASE = \"SRR13974039\"\n",
+        "SRR_POST = \"SRR13974040\"\n",
+        "GENE = \"BRAF\"\n",
+        "THREADS = \"2\"\n",
+        "\n",
+        "os.environ[\"PROJECT\"] = PROJECT\n",
+        "os.environ[\"GENE\"] = GENE\n",
+        "\n",
+        "for d in [\"fastq\",\"reference\",\"bam\",\"qc\",\"logs\",\"results\"]:\n",
+        "    os.makedirs(os.path.join(PROJECT, d), exist_ok=True)\n"
+      ],
+      "metadata": {
+        "id": "x0F8htN-Vt18"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "import subprocess, os, time\n",
+        "\n",
+        "fastq_dir = os.path.join(PROJECT, \"fastq\")\n",
+        "os.chdir(fastq_dir)\n",
+        "\n",
+        "def wget_retry(url):\n",
+        "    for i in range(3):\n",
+        "        r = subprocess.run(f\"wget -c {url}\", shell=True)\n",
+        "        if r.returncode == 0:\n",
+        "            return\n",
+        "        time.sleep(5)\n",
+        "    raise RuntimeError(\"Download failed\")\n",
+        "\n",
+        "wget_retry(f\"ftp://ftp.sra.ebi.ac.uk/vol1/fastq/SRR139/039/{SRR_BASE}/{SRR_BASE}_1.fastq.gz\")\n",
+        "wget_retry(f\"ftp://ftp.sra.ebi.ac.uk/vol1/fastq/SRR139/039/{SRR_BASE}/{SRR_BASE}_2.fastq.gz\")\n",
+        "wget_retry(f\"ftp://ftp.sra.ebi.ac.uk/vol1/fastq/SRR139/040/{SRR_POST}/{SRR_POST}_1.fastq.gz\")\n",
+        "wget_retry(f\"ftp://ftp.sra.ebi.ac.uk/vol1/fastq/SRR139/040/{SRR_POST}/{SRR_POST}_2.fastq.gz\")\n",
+        "\n",
+        "subprocess.run(\"gunzip -f *.fastq.gz\", shell=True)\n",
+        "\n",
+        "subprocess.run(f\"mv {SRR_BASE}_1.fastq baseline_R1.fastq\", shell=True)\n",
+        "subprocess.run(f\"mv {SRR_BASE}_2.fastq baseline_R2.fastq\", shell=True)\n",
+        "subprocess.run(f\"mv {SRR_POST}_1.fastq post_R1.fastq\", shell=True)\n",
+        "subprocess.run(f\"mv {SRR_POST}_2.fastq post_R2.fastq\", shell=True)\n"
+      ],
+      "metadata": {
+        "id": "gHYb1XLNVzcw"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "subprocess.run(f\"fastqc {fastq_dir}/*.fastq -o {os.path.join(PROJECT,'qc')}\", shell=True)\n",
+        "\n",
+        "subprocess.run(\n",
+        "    f\"fastp --in1 {fastq_dir}/baseline_R1.fastq --in2 {fastq_dir}/baseline_R2.fastq \"\n",
+        "    f\"--out1 {fastq_dir}/baseline_trim_R1.fastq --out2 {fastq_dir}/baseline_trim_R2.fastq \"\n",
+        "    f\"--html {PROJECT}/qc/baseline_fastp.html --thread {THREADS}\", shell=True\n",
+        ")\n",
+        "\n",
+        "subprocess.run(\n",
+        "    f\"fastp --in1 {fastq_dir}/post_R1.fastq --in2 {fastq_dir}/post_R2.fastq \"\n",
+        "    f\"--out1 {fastq_dir}/post_trim_R1.fastq --out2 {fastq_dir}/post_trim_R2.fastq \"\n",
+        "    f\"--html {PROJECT}/qc/post_fastp.html --thread {THREADS}\", shell=True\n",
+        ")\n"
+      ],
+      "metadata": {
+        "id": "dfPHvg5TV7Jx"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "ref_dir = os.path.join(PROJECT, \"reference\")\n",
+        "os.chdir(ref_dir)\n",
+        "\n",
+        "run(\"wget -c https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_45/GRCh38.primary_assembly.genome.fa.gz\")\n",
+        "run(\"gunzip -f GRCh38.primary_assembly.genome.fa.gz\")\n",
+        "run(\"samtools faidx GRCh38.primary_assembly.genome.fa\")\n",
+        "run(\"bwa index GRCh38.primary_assembly.genome.fa\")\n"
+      ],
+      "metadata": {
+        "id": "jZTbcUAdV-nI"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "gtf = \"gencode.v45.annotation.gtf\"\n",
+        "run(\"wget -q ftp://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_45/gencode.v45.annotation.gtf.gz\")\n",
+        "run(f\"gunzip -f {gtf}.gz\")\n",
+        "\n",
+        "bed_path = f\"{PROJECT}/BRAF.exons.merged.bed\"\n",
+        "cmd = (\n",
+        "    f\"awk -v g='{GENE}' 'BEGIN{{FS=\\\"\\\\t\\\"}} \"\n",
+        "    f\"$3==\\\"exon\\\" && $0 ~ \\\"gene_name \\\\\\\"\\\"g\\\"\\\\\\\"\\\" \"\n",
+        "    f\"{{print $1\\\"\\\\t\\\"($4-1)\\\"\\\\t\\\"$5\\\"\\\\t\\\"g}}' {gtf} | \"\n",
+        "    \"sort -k1,1 -k2,2n | bedtools merge -i - -c 4 -o distinct \"\n",
+        "    f\"> {bed_path}\"\n",
+        ")\n",
+        "run(cmd)\n"
+      ],
+      "metadata": {
+        "id": "qM7dSwHFWBG0"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "ref = f\"{PROJECT}/reference/GRCh38.primary_assembly.genome.fa\"\n",
+        "bam_dir = f\"{PROJECT}/bam\"\n",
+        "\n",
+        "run(\n",
+        "    f\"bwa mem -t {THREADS} {ref} {fastq_dir}/baseline_trim_R1.fastq {fastq_dir}/baseline_trim_R2.fastq \"\n",
+        "    f\"| samtools view -bS -o {bam_dir}/baseline.bam -\"\n",
+        ")\n",
+        "\n",
+        "run(f\"samtools sort -o {bam_dir}/baseline.sorted.bam {bam_dir}/baseline.bam\")\n",
+        "run(f\"samtools index {bam_dir}/baseline.sorted.bam\")\n",
+        "\n",
+        "run(\n",
+        "    f\"bwa mem -t {THREADS} {ref} {fastq_dir}/post_trim_R1.fastq {fastq_dir}/post_trim_R2.fastq \"\n",
+        "    f\"| samtools view -bS -o {bam_dir}/post.bam -\"\n",
+        ")\n",
+        "\n",
+        "run(f\"samtools sort -o {bam_dir}/post.sorted.bam {bam_dir}/post.bam\")\n",
+        "run(f\"samtools index {bam_dir}/post.sorted.bam\")\n"
+      ],
+      "metadata": {
+        "id": "v80vv-VJWE-R"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "results = f\"{PROJECT}/results\"\n",
+        "BED = f\"{PROJECT}/BRAF.exons.merged.bed\"\n",
+        "\n",
+        "run(\n",
+        "    f\"freebayes -f {ref} -t {BED} --min-alternate-fraction 0.005 --min-alternate-count 3 \"\n",
+        "    f\"{bam_dir}/baseline.sorted.bam > {results}/BRAF_baseline.raw.vcf\"\n",
+        ")\n",
+        "\n",
+        "run(\n",
+        "    f\"freebayes -f {ref} -t {BED} --min-alternate-fraction 0.005 --min-alternate-count 3 \"\n",
+        "    f\"{bam_dir}/post.sorted.bam > {results}/BRAF_post.raw.vcf\"\n",
+        ")\n"
+      ],
+      "metadata": {
+        "id": "jaL409GHWIoL"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "run(f\"bgzip -c {results}/BRAF_baseline.raw.vcf > {results}/BRAF_baseline.raw.vcf.gz\")\n",
+        "run(f\"bgzip -c {results}/BRAF_post.raw.vcf > {results}/BRAF_post.raw.vcf.gz\")\n",
+        "\n",
+        "run(f\"tabix -p vcf {results}/BRAF_baseline.raw.vcf.gz\")\n",
+        "run(f\"tabix -p vcf {results}/BRAF_post.raw.vcf.gz\")\n",
+        "\n",
+        "run(\n",
+        "    f\"bcftools norm -f {ref} -m -both {results}/BRAF_baseline.raw.vcf.gz -Oz \"\n",
+        "    f\"-o {results}/BRAF_baseline.norm.vcf.gz\"\n",
+        ")\n",
+        "\n",
+        "run(\n",
+        "    f\"bcftools norm -f {ref} -m -both {results}/BRAF_post.raw.vcf.gz -Oz \"\n",
+        "    f\"-o {results}/BRAF_post.norm.vcf.gz\"\n",
+        ")\n",
+        "\n",
+        "run(\n",
+        "    f\"bcftools view -i 'QUAL>20 && INFO/DP>10' {results}/BRAF_baseline.norm.vcf.gz \"\n",
+        "    f\"-Ov -o {results}/BRAF_baseline.filtered.vcf\"\n",
+        ")\n",
+        "\n",
+        "run(\n",
+        "    f\"bcftools view -i 'QUAL>20 && INFO/DP>10' {results}/BRAF_post.norm.vcf.gz \"\n",
+        "    f\"-Ov -o {results}/BRAF_post.filtered.vcf\"\n",
+        ")\n"
+      ],
+      "metadata": {
+        "id": "9Zf6pB5dWMUz"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "compare_dir = f\"{results}/BRAF_compare\"\n",
+        "run(f\"mkdir -p {compare_dir}\")\n",
+        "\n",
+        "run(\n",
+        "    f\"bcftools isec {results}/BRAF_baseline.filtered.vcf \"\n",
+        "    f\"{results}/BRAF_post.filtered.vcf -p {compare_dir}\"\n",
+        ")\n"
+      ],
+      "metadata": {
+        "id": "FjJdCB8PWR_I"
+      },
+      "execution_count": null,
+      "outputs": []
+    }
+  ]
+}
